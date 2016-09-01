@@ -8,6 +8,28 @@ from generic_utils import *
 srng = RandomStreams(seed=3732)
 T.nnet.relu = lambda x: T.switch(x > floatX(0.), x, floatX(0.00001)*x)
 
+def linear_transform_weights(input_dim, output_dim, initialization = 'glorot', param_list = None, name = "", w_normalization=True):
+	"theano shared variable given input and output dimension and initialization method"
+	if initialization == 'glorot':
+		weight_inialization = uniform(numpy.sqrt(2.0/input_dim),(input_dim, output_dim))
+	else:
+		raise Exception("Not Implemented Error: {} initialization not implemented".format(initialization))
+
+	W = theano.shared(weight_inialization, name=name)
+
+	assert(param_list is not None)
+
+	if w_normalization:
+		norm_val = numpy.linalg.norm(weight_inialization, axis=0)
+		g = theano.shared(norm_val, name=W.name+'.g')
+		W_normed = W * (g / W.norm(2, axis=0)).dimshuffle('x',0)
+		param_list.append(W)
+		param_list.append(g)
+		return W_normed
+	else:
+		param_list.append(W)
+		return W
+
 
 def uniform(stdev, size):
     """uniform distribution with the given stdev and size"""
@@ -391,6 +413,32 @@ class WrapperLayer(Layer):
 		self.params = []
 		self.name = name
 		self.X = X
+
+	def output(self):
+		return self.X
+
+class Average(Layer):
+	def __init__(self, X, num_channels = 1, window = None, avg_type = '2d', name = ""):
+		'''
+		window: shape of window where averaging would be applied,
+		 		filter of shape (num_channels, num_channels, window[0], window[1]) or 
+		 		(num_channels, num_channels, window[0], 1) will be created.
+		 		
+
+		'''
+		self.params = []
+		self.name = name
+		self.X = X
+		self.avg_type = avg_type
+		elem_avg = numpy.prod(window)
+
+		filter_init = numpy.ones(window, dtype='float32').fill(1./elem_avg)
+
+		smoothing_filter = theano.shared(filter_init, name= name+"smoother")
+
+		
+
+
 
 	def output(self):
 		return self.X

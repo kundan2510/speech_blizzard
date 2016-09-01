@@ -29,10 +29,9 @@ parser = argparse.ArgumentParser(description='Generating single acoustic sample 
 
 parser.add_argument('-o','--output_folder', required=True, help='Base output folder for storing generated audio, parameters and training costs')
 parser.add_argument('-tdata','--train_data_folder', required=True, help="A folder path containing flac files")
-parser.add_argument('-bs', '--batch_size', default= 128, type=int, help="Number of examples to consider in a batch")
-parser.add_argument('-tbptt', '--truncated_back_prop_time', default= 64, type=int, help="number of time-steps for backpropagating errors for recurrent cunnections")
-parser.add_argument('-n_gru','--number_of_gru', default=1, type=int)
-parser.add_argument('-ql', '--q_level', default=256, type=int)
+parser.add_argument('-bs', '--batch_size', default= 64, type=int, help="Number of examples to consider in a batch")
+parser.add_argument('-tbptt', '--truncated_back_prop_time', default= 128, type=int, help="number of time-steps for backpropagating errors for recurrent cunnections")
+parser.add_argument('-sc','--num_scale', default=3, type=int)
 parser.add_argument('-br','--bitrate', default=16000, type=int)
 # parser.add_argument('-dim','--gru_dimension', default=512, type=int) # dim is width_dim x depth_dim
 parser.add_argument('-oi','--other_info', default='')
@@ -47,9 +46,7 @@ parser.add_argument('-gc','--grad_clip', default=1, type=numpy.float32)
 parser.add_argument('-ns','--num_gen_samples', default=10, type=int)
 parser.add_argument('-lgs','--length_gen_sample', default=3, type=int, help="Give length of generated samples in seconds")
 parser.add_argument('-pre','--pre_trained_model', default=None, help="Path to pre-trained model")
-parser.add_argument('-np','--num_pixelCNN_layer', default=4, type=int, help="Number of pixel CNN layers to use")
-parser.add_argument('-wd','--width_dim', default=16, type=int, help="Number of groups of dimensions which are groupwise conditioned")
-parser.add_argument('-dep','--depth_dim', default=32, type=int, help="Length of a single group of dimension in which everything is considered independent pf each other.")
+parser.add_argument('-dim','--max_gru_dim', default=512, type=int, help="Dimension of GRU")
 parser.add_argument('-n_files','--num_files', default=10000, type=int, help="Number of flac files to use.")
 
 
@@ -60,18 +57,15 @@ TRAIN_DATA_FOLDER = args.train_data_folder
 
 BATCH_SIZE = args.batch_size
 NUM_SAMPLES_IN_TBPTT = args.truncated_back_prop_time # How many audio samples to include in each truncated BPTT pass
-N_GRUS = args.number_of_gru # How many GRUs to stack in the model
 WIDTH = args.width_dim
 DEPTH = args.depth_dim
 
 N_FILES = args.num_files
 
-DIM = WIDTH*DEPTH # GRU dimension
-Q_LEVELS = args.q_level # How many levels to use when discretizing samples. e.g. 256 = 8-bit scalar quantization
+DIM = args.max_gru_dim # GRU dimension
 GRAD_CLIP = args.grad_clip # Elementwise grad clip threshold
 BITRATE = args.bitrate
-NUM_PIXEL_CNN_LAYER = args.num_pixelCNN_layer
-
+NUM_SCALE = args.num_scale # number of scales to use / number of GRUs to use
 
 TRAIN_MODE = args.print_mode #one of 'epoch', 'time' or 'iters'
 PRINT_ITERS = args.print_iters # Print cost, generate samples, save model checkpoint every N iterations.
@@ -110,6 +104,11 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
+def single_scale(model=None, input_sequences=None, old_h0s=None, reset):
+	new_h0s = T.zeros_like(old_h0s)
+	h0s = theano.ifelse.ifelse(reset, new_h0s, old_h0s)
+	input_layer = 
+	gru_layer = GRU(DIM, DIM, , s0 = h0s[i,:,:], name = model.name+"GRU_{}".format(i))
 
 def create_output_node(model=None, input_sequences=None, num_gru=None, old_h0s=None, reset=None, num_pixelCNN_layer = None):
 	assert(model is not None)
@@ -122,25 +121,6 @@ def create_output_node(model=None, input_sequences=None, num_gru=None, old_h0s=N
 	new_h0s = T.zeros_like(old_h0s)
 	h0s = theano.ifelse.ifelse(reset, new_h0s, old_h0s)
 
-	embedding_layer = Embedding(Q_LEVELS, DIM, input_sequences, name = model.name+"Embedding.Q_LEVELS")
-	model.add_layer(embedding_layer)
-
-
-	prev_out = embedding_layer.output()
-	last_layer = WrapperLayer(prev_out.reshape((prev_out.shape[0], prev_out.shape[1], WIDTH, DEPTH)))
-
-	pixel_CNN = pixelConv(
-		last_layer,
-		DEPTH,
-		DEPTH,
-		name = model.name + ".pxCNN",
-		num_layers = NUM_PIXEL_CNN_LAYER
-	)
-
-	prev_out = pixel_CNN.output()
-	last_layer = WrapperLayer(prev_out.reshape((prev_out.shape[0], prev_out.shape[1], -1)))
-
-	last_hidden_list = []
 
 	for i in range(num_gru):
 		gru_layer = GRU(DIM, DIM, last_layer, s0 = h0s[i,:,:], name = model.name+"GRU_{}".format(i))
